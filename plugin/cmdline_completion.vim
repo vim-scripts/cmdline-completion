@@ -1,7 +1,7 @@
 " File:        cmdline_completion.vim
 " Author:      K1n9Ti9er <ljh575@gmail.com>
-" Last Change: April 15 , 2011
-" Version:     0.02
+" Last Change: March 5, 2012
+" Version:     0.03
 "
 " Description: This script let you can use CTRL-P/N to complete 
 "              word in cmdline mode just like in insert mode.
@@ -41,12 +41,17 @@ cnoremap <silent> <Plug>CmdlineCompletionForward  <C-\>e<SID>CmdlineCompletion(0
 function! s:CmdlineCompletion(backword)
 
     let cmdline = getcmdline()
+    let cmdpos = getcmdpos() - 1
+
+    let cmdline_tail = strpart(cmdline, cmdpos) 
+    let cmdline = strpart(cmdline,0,cmdpos)
+
     let index = match(cmdline, '\w\+$')
     let cmd = strpart(cmdline, 0, index)
 
     " Not a word , skip completion
     if index < 0 
-        return cmdline
+        return cmdline . cmdline_tail
     endif
 
     " s:vars initial if first time or changed cmdline.
@@ -58,6 +63,10 @@ function! s:CmdlineCompletion(backword)
         let b:cc_pos_forward = [0,0]
         let b:cc_pos_backward = [0,0]
         let b:cc_search_status = 1
+        let b:cc_search_time = ''
+        if version >= 702
+            let b:cc_search_total_time = 0
+        endif
     endif
 
     "
@@ -71,7 +80,12 @@ function! s:CmdlineCompletion(backword)
     if b:cc_search_status && ( b:cc_word_index < 0 
                 \ || b:cc_word_index >= len(b:cc_word_list))
         let save_cursor = getpos('.')
+        let start = reltime()
         let b:cc_search_status = s:CmdlineSearch(a:backword)
+        let b:cc_search_time = reltimestr(reltime(start))
+        if version >= 702
+            let b:cc_search_total_time += str2float(b:cc_search_time)
+        endif
         call setpos('.', save_cursor)
     endif
 
@@ -97,7 +111,10 @@ function! s:CmdlineCompletion(backword)
     " overcome map silent
     call feedkeys(" \<bs>")
 
-    return  b:cc_newcmdline
+    " set new cmdline cursor postion
+    call setcmdpos(len(b:cc_newcmdline)+1)
+
+    return  b:cc_newcmdline . cmdline_tail
 
 endfunction
 
