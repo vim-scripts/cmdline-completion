@@ -1,10 +1,14 @@
 This is a mirror of http://www.vim.org/scripts/script.php?script_id=3531
 
-This script let you can use CTRL-P/N to complete word in cmdline mode just like in insert mode.
-it also works fine with large file.
+This script let you can use CTRL-P/N to complete word in cmdline mode
+ just like in insert mode.
 
-you can map other keys instead of <C-P/N> like this in your vimrc: 
-               cmap <C-J> <Plug>CmdlineCompletionBackward
-               cmap <C-K> <Plug>CmdlineCompletionForward
+for instance :
+            1.   :something<C-P>
+            2.   /else<C-N>
+      
+you also can map other keys instead of <C-P/N> like this in your vimrc: 
+            cmap <C-J> <Plug>CmdlineCompletionBackward
+            cmap <C-K> <Plug>CmdlineCompletionForward
 
 

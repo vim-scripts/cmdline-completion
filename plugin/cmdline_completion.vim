@@ -1,7 +1,13 @@
 " File:        cmdline_completion.vim
-" Author:      K1n9Ti9er <ljh575@gmail.com>
-" Last Change: April 15 , 2011
-" Version:     0.02
+" Author:      kin9 <ljh575@gmail.com>
+" Last Change: Oct 31, 2012
+"
+" Version:     0.04
+"              ----- Add search in loaded buffers support .
+"
+"              0.03
+"              ----- Add support cursor at anywhere of cmdline.
+"
 "
 " Description: This script let you can use CTRL-P/N to complete 
 "              word in cmdline mode just like in insert mode.
@@ -21,7 +27,7 @@ endif
 
 let loaded_cmdline_completion = 1
 
-"""""""""""""""""""""""""""""""""""""""""""""
+"-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 " map key
 "
 if !hasmapto('<Plug>CmdlineCompletionBackward','c')
@@ -32,21 +38,28 @@ if !hasmapto('<Plug>CmdlineCompletionForward','c')
     cmap <unique> <silent> <C-N> <Plug>CmdlineCompletionForward
 endif
 
-cnoremap <silent> <Plug>CmdlineCompletionBackward <C-\>e<SID>CmdlineCompletion(1)<CR>
-cnoremap <silent> <Plug>CmdlineCompletionForward  <C-\>e<SID>CmdlineCompletion(0)<CR>
+cnoremap <silent> <Plug>CmdlineCompletionBackward 
+            \ <C-\>e<SID>CmdlineCompletion(1)<CR>
+cnoremap <silent> <Plug>CmdlineCompletionForward 
+            \ <C-\>e<SID>CmdlineCompletion(0)<CR>
 
-"""""""""""""""""""""""""""""""""""""""""""""
+"-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 " auto completion function ,
 " return new cmdline with matched word
 function! s:CmdlineCompletion(backword)
 
     let cmdline = getcmdline()
+    let cmdpos = getcmdpos() - 1
+
+    let cmdline_tail = strpart(cmdline, cmdpos) 
+    let cmdline = strpart(cmdline,0,cmdpos)
+
     let index = match(cmdline, '\w\+$')
     let cmd = strpart(cmdline, 0, index)
 
     " Not a word , skip completion
     if index < 0 
-        return cmdline
+        return cmdline . cmdline_tail
     endif
 
     " s:vars initial if first time or changed cmdline.
@@ -57,7 +70,14 @@ function! s:CmdlineCompletion(backword)
         let b:cc_newcmdline = "" 
         let b:cc_pos_forward = [0,0]
         let b:cc_pos_backward = [0,0]
-        let b:cc_search_status = 1
+        let b:cc_search_status = 0
+        let b:cc_search_time = ''
+        let b:cc_buffer_index = 1
+        let b:cc_buffer_pos = [1,0]
+        let b:cc_search_status_current = 1
+        if version >= 702
+            let b:cc_search_total_time = 0
+        endif
     endif
 
     "
@@ -67,16 +87,51 @@ function! s:CmdlineCompletion(backword)
         let b:cc_word_index += 1
     endif
 
-    " try to search new word if index out of list range with cc_search_status
-    if b:cc_search_status && ( b:cc_word_index < 0 
-                \ || b:cc_word_index >= len(b:cc_word_list))
-        let save_cursor = getpos('.')
-        let b:cc_search_status = s:CmdlineSearch(a:backword)
-        call setpos('.', save_cursor)
+    " try to search new word if index out of list range 
+    if ( b:cc_word_index < 0 || b:cc_word_index >= len(b:cc_word_list))
+                \ && b:cc_buffer_index <= bufnr('$')
+
+        let start = reltime()
+
+        while b:cc_buffer_index <= bufnr('$')
+
+            " search current first .
+            if b:cc_search_status_current 
+                let save_cursor = getpos('.')
+                let b:cc_search_status_current = s:SearchCurrent(a:backword)
+                call setpos('.', save_cursor)
+                if  b:cc_search_status_current
+                    break 
+                endif
+
+                "
+                " search other buffers .
+            else 
+                if b:cc_buffer_index == bufnr('%')
+                    let b:cc_buffer_index += 1 
+                    continue 
+                endif
+                let b:cc_search_status =
+                            \ s:SearchBuffer(a:backword,b:cc_buffer_index)
+                if b:cc_search_status 
+                    break 
+                else
+                    let b:cc_buffer_index += 1 
+                    let b:cc_buffer_pos = [1,0]
+                endif
+            endif
+
+        endwhile
+
+
+        let b:cc_search_time = reltimestr(reltime(start))
+        if version >= 702
+            let b:cc_search_total_time += str2float(b:cc_search_time)
+        endif
     endif
 
-    " correct index depend on cc_search_status
-    if b:cc_search_status
+    " correct index 
+    if b:cc_search_status || b:cc_search_status_current
         if b:cc_word_index < 0 
             let b:cc_word_index = 0 
         endif
@@ -97,15 +152,18 @@ function! s:CmdlineCompletion(backword)
     " overcome map silent
     call feedkeys(" \<bs>")
 
-    return  b:cc_newcmdline
+    " set new cmdline cursor postion
+    call setcmdpos(len(b:cc_newcmdline)+1)
+
+    return  b:cc_newcmdline . cmdline_tail
 
 endfunction
 
 
-"""""""""""""""""""""""""""""""""""""""""""""
+"-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 " search completion matched word, 
 " return 0 if match none, else return 1 .
-function! s:CmdlineSearch(backward)
+function! s:SearchCurrent(backward)
 
     let position = a:backward ? b:cc_pos_backward : b:cc_pos_forward
 
@@ -157,6 +215,48 @@ function! s:CmdlineSearch(backward)
 
 endfunction
 
-"""""""""""""""""""""""""""""""""""""""""""""
+"-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+" search other buffers
+" return 0 if match none, else return 1 .
+function! s:SearchBuffer(backward,bufindex)
+
+    let pattern = '\<' . b:cc_word_prefix . '\w\+\>'
+
+    while 1
+
+        " get one line at once
+        let bufline = getbufline(a:bufindex, b:cc_buffer_pos[0]) 
+
+        " Eof detected !
+        if len(bufline) == 0
+            return 0 
+        endif
+
+        " start @ last position
+        let text = strpart(bufline[0],b:cc_buffer_pos[1])
+        let word = matchstr(text,pattern)
+
+        if word == ""
+            let b:cc_buffer_pos = [b:cc_buffer_pos[0]+1,0]
+        else
+            let b:cc_buffer_pos[1] += matchend(text,pattern)
+            " add to list if not exists
+            if count(b:cc_word_list, word) == 0 
+                if a:backward
+                    call insert(b:cc_word_list, word)
+                else
+                    call add(b:cc_word_list, word)
+                endif
+                return 1
+            endif
+        endif
+
+    endwhile
+
+    return 0 
+
+endfunction
+
+"-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 " vim:sts=4:sw=4:ft=vim
 
